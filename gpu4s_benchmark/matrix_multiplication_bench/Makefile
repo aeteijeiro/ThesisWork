@@ -1,17 +1,19 @@
 # CONFIGURATION DIRECTIVES
 # Compilers 
-CC = g++
-NVCC = /usr/local/cuda/bin/nvcc
+#CC = /usr/bin/nvcc
+#NVCC = /usr/bin/nvcc
+CC=nvcc
+NVCC=nvcc
 HIP = /opt/rocm/hip/bin/hipcc
 # the build target executable:
 TARGET = matrix_multiplication
 # FLAGS 
 # CC FUNCTIONS compiler flags:
-CFLAGS  = -O3
+CFLAGS  = -O0
 # CPU compiler flags:
-CPUFLAGS  = -O3
+CPUFLAGS  = -O0
 # NVCC compiler flags
-NVCCFLAGS = -arch compute_72 -code sm_72 -O3
+NVCCFLAGS = -arch compute_86 -code sm_86 -O0
 # CUDA FLAGS
 CUFLAGS = -I/usr/local/cuda/include/ -L/usr/local/cuda/lib64 -lcuda -lcudart 
 # OPENCL FLAGS
@@ -39,6 +41,8 @@ DATATYPE =
 # By default BLOCKSIZE equals 4.
 BLOCKSIZE = 4
 BLOCKSIZESQUARED = $(shell echo $(BLOCKSIZE)\*$(BLOCKSIZE) | bc)
+
+NUMEVENTS =
 
 # FOLDERS
 # CPU FUNCTIONS FOLDER
@@ -118,13 +122,39 @@ main_cpu: main.cpp lib_cpu.o cpu_functions.o
 .PHONY: cuda
 cuda: main_cuda
 
-lib_cuda.o: $(CUFOLDER)lib_cuda.cu
-	$(NVCC) -D$(DATATYPE) -DBLOCK_SIZE=$(BLOCKSIZE) -DCUDA -c $(CUFOLDER)lib_cuda.cu -o $(CUFOLDER)lib_cuda.o $(NVCCFLAGS)
+lib_cuda.o:
+	rm $(CUFOLDER)lib_cuda.o	
+	mv build/lib_cuda.o $(CUFOLDER)
 
+pre-ptx:
+	cd build;./pre_ptx.sh
+
+pre-ptx-golden:
+	cd build;./pre_ptx.sh
+	cd utils; python3 inject_errors.py $(INJECTION_TARGET) $(SM_COUNT) golden; mv lib_cuda.ptx ../build/
+
+post-ptx:
+	cd build;./post_ptx.sh
+
+inj-ptx: pre-ptx
+	cd utils; python3 inject_errors.py $(INJECTION_TARGET) $(SM_COUNT) injected; mv lib_cuda.ptx ../build/
+
+injected_errors: inj-ptx post-ptx main_cuda
+
+golden: pre-ptx-golden post-ptx main_cuda
+dry-run:
+	cp cuda/* build/
+	cd build; $(NVCC) -dryrun --keep -D$(DATATYPE) -DBLOCK_SIZE=$(BLOCKSIZE) -DCUDA -c lib_cuda.cu -o lib_cuda.o $(NVCCFLAGS)
+
+tests:
+	cd utils; echo "Makefile EVENTS_PER_FILE=$(EVENTS_PER_FILE) TOTAL_EVENTS=$(TOTAL_EVENTS)"; ./run_both_tests_shortlist.sh $(EVENTS_PER_FILE) $(TOTAL_EVENTS) $(SAMPLES_PER_EVENT) $(EVENT_TYPE) $(STARTING_POINT); python3 organize_data.py $(INJECTION_TARGET) $(EVENT_TYPE) $(SM_COUNT) $(SAMPLES_PER_EVENT); python3 analysis.py no no svm $(INJECTION_TARGET) $(EVENT_TYPE) $(SM_COUNT) $(SAMPLES_PER_EVENT) 
+
+clean_runs:
+	rm -f bin/golden_runs/profiler/* bin/injector_runs/profiler/* bin/golden_runs/benchmark/* bin/injector_runs/benchmark/* utils/final_dataset_$(INJECTION_TARGET)_$(EVENT_TYPE).parquet
 
 main_cuda: main.cpp lib_cuda.o cpu_functions.o
 	mkdir -p $(OUTPUTFOLDER)
-	$(CC) -D$(DATATYPE) -DCUDA main.cpp $(CUFOLDER)lib_cuda.o $(CPUFUNCTIONFOLDER)cpu_functions.o -o $(OUTPUTFOLDER)$(TARGET)_cuda_$(shell echo $(DATATYPE) | tr A-Z a-z)_$(BLOCKSIZESQUARED) $(CUFLAGS) $(CFLAGS) -lstdc++
+	$(CC) -g -G -D$(DATATYPE) -DCUDA -DPAPI main.cpp $(CUFOLDER)lib_cuda.o $(CPUFUNCTIONFOLDER)cpu_functions.o -o $(OUTPUTFOLDER)$(TARGET)_cuda_$(shell echo $(DATATYPE) | tr A-Z a-z)_$(BLOCKSIZESQUARED) $(CUFLAGS) $(CFLAGS) -lstdc++ -L/home/antonio/Documents/PerFI_PAPI_wd/PAPI/papi/src/install/lib -lpapi -L/home/antonio/Documents/PerFI_PAPI_wd/PAPI/papi/src/testlib -ltestlib 
 # End CUDA
 
 # OpenCL Part
@@ -168,7 +198,7 @@ main_hip: main.cpp lib_hip.o cpu_functions.o
 cuda-opt: main_cuda_opt
 
 lib_cuda_opt.o: $(CUFOLDER)lib_cuda_opt.cu
-	$(NVCC) -D$(DATATYPE) -DBLOCK_SIZE=$(BLOCKSIZE) -DCUDA -c $(CUFOLDER)lib_cuda_opt.cu -o $(CUFOLDER)lib_cuda_opt.o $(NVCCFLAGS)
+	$(NVCC) -D$(DATATYPE) -DBLOCK_SIZE=$(BLOCKSIZE) -DPAPI -DCUDA -c $(CUFOLDER)lib_cuda_opt.cu -o $(CUFOLDER)lib_cuda_opt.o $(NVCCFLAGS)
 
 
 main_cuda_opt: main.cpp lib_cuda_opt.o cpu_functions.o

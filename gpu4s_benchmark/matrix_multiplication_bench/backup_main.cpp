@@ -2,10 +2,6 @@
 #include "benchmark_library.h"
 #include "cpu_functions/cpu_functions.h"
 #include <sys/time.h>
-#include "PAPI/PAPI_helpers.h"
-#include "PAPI/beforeLaunch.c"
-#include "PAPI/afterLaunch.c"
-
 
 #define NUMBER_BASE 1
 // OUTPUT C is N x W matrix
@@ -122,16 +118,11 @@ int main(int argc, char *argv[])
 		printf("Using device: %s\n", device);
 	}
 	
-	#ifdef PAPI
-	PAPI_pre(argc,argv);
-	#endif
-
 	// init memory
 	device_memory_init(matrix_bench, arguments_parameters->size * arguments_parameters->size, arguments_parameters->size * arguments_parameters->size, size_matrix);
 	// copy memory to device
 	copy_memory_to_device(matrix_bench, A, B, arguments_parameters->size * arguments_parameters->size, arguments_parameters->size * arguments_parameters->size);
 	// execute kernel
-	//printf("m: %u",arguments_parameters->size);
 	execute_kernel(matrix_bench, arguments_parameters->size, arguments_parameters->size,arguments_parameters-> size);
 	// copy memory to host
 	copy_memory_to_host(matrix_bench, d_C, size_matrix);
@@ -141,24 +132,19 @@ int main(int argc, char *argv[])
 	{
 		get_elapsed_time(matrix_bench, arguments_parameters->csv_format, arguments_parameters->csv_format_timestamp, get_timestamp());
 	}
-	
-	#ifdef PAPI
-        PAPI_post(argc,argv);
-        #endif
-	
 	if (arguments_parameters->print_output)
 	{
 		#ifdef INT
 		for (int i=0; i<arguments_parameters->size; i++){
 	    	for (int j=0; j<arguments_parameters->size; j++){
-	    		printf("%d \n", d_C[i*arguments_parameters->size+j]);
+	    		printf("%d ", d_C[i*arguments_parameters->size+j]);
 	        	
 	    	    }
 		}
 		#else
 		for (int i=0; i<arguments_parameters->size; i++){
 	    	for (int j=0; j<arguments_parameters->size; j++){
-	    		printf("%f \n", d_C[i*arguments_parameters->size+j]);
+	    		printf("%f ", d_C[i*arguments_parameters->size+j]);
 	        	
 	    	}
     		printf("\n");
@@ -227,7 +213,6 @@ int main(int argc, char *argv[])
 	free(B);
 	free(h_C);
 	free(d_C);
-	test_pass(__FILE__);
 return 0;
 }
 
@@ -272,26 +257,10 @@ int arguments_handler(int argc, char ** argv, BenchmarkParameters* arguments_par
 		print_usage(argv[0]);
 		return ERROR_ARGUMENTS;
 	} 
-	unsigned int num_tests = 0;
-	switch(strlen(argv[1])){
-                case 1 : num_tests=((unsigned int) argv[1][0])-48; break;//printf("in main.cpp event 1"); break;
-                case 2 : ones =((unsigned int) argv[1][1])-48; tens=((unsigned int) argv[1][0])-48; num_tests=ones+(tens*10); break;//printf("in main.cpp event 2"); break;
-                case 3 : ones =((unsigned int) argv[1][2])-48; tens=((unsigned int) argv[1][1])-48; hundreds=((unsigned int) argv[1][0])-48; num_tests=ones+(tens*10)+(hundreds*100); break;
-                default : printf("ERROR: Invalid eventCountabove, strlength: %lu",strlen(argv[1])); break;
-	}	
-	if (num_tests == 0) {
-                fprintf(stderr, "No eventnames specified at command line.");
-                test_skip(__FILE__, __LINE__, "", 0);
-        }
-
-	//unsigned int num_tests = ((unsigned int) (argv[1][0]))-48);
-	//printf("\nnum_tests: %u\n",num_tests);
-	for(unsigned int args = 2; args < (argc-num_tests); ++args)
+	for(unsigned int args = 1; args < argc; ++args)
 	{
-		//printf("case: %c\n",argv[args][1]);
 		switch (argv[args][1]) {
 			// comon part
-			//printf("case: %u\n",argv[args][1]);
 			case 'v' : arguments_parameters->verification = true;break;
 			case 'e' : arguments_parameters->verification = true; arguments_parameters->export_results= true;break;
 			case 'o' : arguments_parameters->print_output = true;break;

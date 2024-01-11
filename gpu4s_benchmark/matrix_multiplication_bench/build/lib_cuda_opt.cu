@@ -9,27 +9,64 @@
 __global__ void
 matrix_multiplication_kernel(const bench_t *A,const bench_t *B,  bench_t *C, const int n, const int m, const int w)
 {
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int j = blockIdx.y * blockDim.y + threadIdx.y;
-    if (i < n && j < w){
-        bench_t acumulated = 0;
-        for (unsigned int k_d = 0; k_d < m; ++k_d )
+    __shared__ bench_t A_tile[BLOCK_SIZE*BLOCK_SIZE];
+    __shared__ bench_t B_tile[BLOCK_SIZE*BLOCK_SIZE];
+
+    
+    unsigned int i = blockIdx.x *  BLOCK_SIZE + threadIdx.x;
+    unsigned int j = blockIdx.y *  BLOCK_SIZE + threadIdx.y;
+    
+    
+    bench_t acumulated = 0;
+    unsigned int idx = 0;
+    // load memory
+    for (unsigned int sub = 0; sub < gridDim.x; ++sub)
+    {
+        
+        idx = i * n + sub * BLOCK_SIZE + threadIdx.y;
+
+        if(idx >= m*n)
         {
-            acumulated += A[i*n+k_d] * B[k_d*w +j];
+            A_tile[threadIdx.x * BLOCK_SIZE+ threadIdx.y] = 0;
         }
-        C[i*n+j] =  acumulated;
+        else
+        {   
+            A_tile[threadIdx.x * BLOCK_SIZE + threadIdx.y] = A[idx];
+        }
+        idx = (sub * BLOCK_SIZE + threadIdx.x) * w + j;
+
+        if (idx >= m*w)
+        {
+            B_tile[threadIdx.x * BLOCK_SIZE +  threadIdx.y] = 0;
+        }
+        else
+        {   
+            B_tile[threadIdx.x* BLOCK_SIZE + threadIdx.y] = B[idx];
+        }
+        __syncthreads();
+        for (unsigned int k = 0; k < BLOCK_SIZE; ++k)
+        {
+            acumulated +=  A_tile[threadIdx.x*BLOCK_SIZE + k] * B_tile[k*BLOCK_SIZE + threadIdx.y];
+        }
+        __syncthreads();
+
+    }
+    if (i < n && j < w)
+    {
+        
+        C[i *n + j] = acumulated;
     }
 }
 
 void init(GraficObject *device_object, char* device_name){
-	init(device_object, 0,0, device_name);
+    init(device_object, 0,0, device_name);
 }
 
 void init(GraficObject *device_object, int platform ,int device, char* device_name){
-	cudaSetDevice(device);
-	cudaDeviceProp prop;
-	cudaGetDeviceProperties(&prop, device);
-	//printf("Using device: %s\n", prop.name);
+    cudaSetDevice(device);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, device);
+    //printf("Using device: %s\n", prop.name);
     strcpy(device_name,prop.name);
     //event create 
     device_object->start = new cudaEvent_t;
@@ -49,11 +86,11 @@ void init(GraficObject *device_object, int platform ,int device, char* device_na
 
 
 bool device_memory_init(GraficObject *device_object, unsigned int size_a_matrix, unsigned int size_b_matrix, unsigned int size_c_matrix){
-   
+
    // Allocate the device input vector A
 	cudaError_t err = cudaSuccess;
     err = cudaMalloc((void **)&device_object->d_A, size_a_matrix * sizeof(bench_t));
-    //printf("init; d_A at address: %p: \n",device_object->d_A);
+
     if (err != cudaSuccess)
     {
         return false;
@@ -80,6 +117,7 @@ bool device_memory_init(GraficObject *device_object, unsigned int size_a_matrix,
 void copy_memory_to_device(GraficObject *device_object, bench_t* h_A, bench_t* h_B, unsigned int size_a, unsigned int size_b){
     cudaEventRecord(*device_object->start_memory_copy_device);
 	cudaError_t err = cudaMemcpy(device_object->d_A, h_A, sizeof(bench_t) * size_a, cudaMemcpyHostToDevice);
+
     if (err != cudaSuccess)
     {
         fprintf(stderr, "Failed to copy vector A from host to device (error code %s)!\n", cudaGetErrorString(err));
@@ -92,7 +130,6 @@ void copy_memory_to_device(GraficObject *device_object, bench_t* h_A, bench_t* h
         return;
     }
     cudaEventRecord(*device_object->stop_memory_copy_device);
-    
 }
 void execute_kernel(GraficObject *device_object, unsigned int n, unsigned int m,unsigned int w){
     dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
@@ -104,9 +141,9 @@ void execute_kernel(GraficObject *device_object, unsigned int n, unsigned int m,
 
 void copy_memory_to_host(GraficObject *device_object, bench_t* h_C, int size){
     cudaEventRecord(*device_object->start_memory_copy_host);
-    cudaMemcpy(h_C, device_object->d_C, size * sizeof(bench_t), cudaMemcpyDeviceToHost);
+	cudaMemcpy(h_C, device_object->d_C, size * sizeof(bench_t), cudaMemcpyDeviceToHost);
     cudaEventRecord(*device_object->stop_memory_copy_host);
-}
+	}
 
 float get_elapsed_time(GraficObject *device_object, bool csv_format, bool csv_format_timestamp, long int current_time){
     cudaEventSynchronize(*device_object->stop_memory_copy_host);
@@ -132,9 +169,9 @@ float get_elapsed_time(GraficObject *device_object, bool csv_format, bool csv_fo
 }
 
 void clean(GraficObject *device_object){
-    cudaError_t err = cudaSuccess;
-    err = cudaFree(device_object->d_A);
-    //printf("cleanup; d_A at address: %p: \n",device_object->d_A);
+	cudaError_t err = cudaSuccess;
+	err = cudaFree(device_object->d_A);
+
     if (err != cudaSuccess)
     {
         fprintf(stderr, "Failed to free device vector A (error code %s)!\n", cudaGetErrorString(err));

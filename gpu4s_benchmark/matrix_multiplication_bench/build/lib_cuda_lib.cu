@@ -1,35 +1,16 @@
+#include <cublas_v2.h>
 #include "../benchmark_library.h"
 
-/**
- * CUDA Kernel Device code
- *
- * Computes the vector addition of A and B into C. The 3 vectors have the same
- * number of elements numElements.
- */
-__global__ void
-matrix_multiplication_kernel(const bench_t *A,const bench_t *B,  bench_t *C, const int n, const int m, const int w)
-{
-    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-    unsigned int j = blockIdx.y * blockDim.y + threadIdx.y;
-    if (i < n && j < w){
-        bench_t acumulated = 0;
-        for (unsigned int k_d = 0; k_d < m; ++k_d )
-        {
-            acumulated += A[i*n+k_d] * B[k_d*w +j];
-        }
-        C[i*n+j] =  acumulated;
-    }
-}
 
 void init(GraficObject *device_object, char* device_name){
-	init(device_object, 0,0, device_name);
+    init(device_object, 0,0, device_name);
 }
 
 void init(GraficObject *device_object, int platform ,int device, char* device_name){
-	cudaSetDevice(device);
-	cudaDeviceProp prop;
-	cudaGetDeviceProperties(&prop, device);
-	//printf("Using device: %s\n", prop.name);
+    cudaSetDevice(device);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, device);
+    //printf("Using device: %s\n", prop.name);
     strcpy(device_name,prop.name);
     //event create 
     device_object->start = new cudaEvent_t;
@@ -49,11 +30,11 @@ void init(GraficObject *device_object, int platform ,int device, char* device_na
 
 
 bool device_memory_init(GraficObject *device_object, unsigned int size_a_matrix, unsigned int size_b_matrix, unsigned int size_c_matrix){
-   
+
    // Allocate the device input vector A
 	cudaError_t err = cudaSuccess;
     err = cudaMalloc((void **)&device_object->d_A, size_a_matrix * sizeof(bench_t));
-    //printf("init; d_A at address: %p: \n",device_object->d_A);
+
     if (err != cudaSuccess)
     {
         return false;
@@ -91,22 +72,37 @@ void copy_memory_to_device(GraficObject *device_object, bench_t* h_A, bench_t* h
         fprintf(stderr, "Failed to copy vector B from host to device (error code %s)!\n", cudaGetErrorString(err));
         return;
     }
-    cudaEventRecord(*device_object->stop_memory_copy_device);
-    
+    cudaEventRecord(*device_object->stop_memory_copy_device);   
 }
 void execute_kernel(GraficObject *device_object, unsigned int n, unsigned int m,unsigned int w){
-    dim3 dimBlock(BLOCK_SIZE, BLOCK_SIZE);
-    dim3 dimGrid(ceil(float(n)/dimBlock.x), ceil(float(m)/dimBlock.y));
+    // cublas settings
+    int lda=m,ldb=m,ldc=m;
+    const bench_t alf = 1;
+    const bench_t bet = 0;
+    const bench_t *alpha = &alf;
+    const bench_t *beta = &bet;
+    cublasHandle_t handle;
+    cublasCreate(&handle);
     cudaEventRecord(*device_object->start);
-    matrix_multiplication_kernel<<<dimGrid, dimBlock>>>(device_object->d_A, device_object->d_B, device_object->d_C, n, m, w);
+    //cublasSetMathMode(handle, CUBLAS_TENSOR_OP_MATH);
+    #ifdef INT
+    printf("CUBLAS NOT SUPPORT INT OPERATIOS\n");
+    #elif FLOAT
+    cublasSgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, w, alpha, device_object->d_B, lda, device_object->d_A, ldb, beta, device_object->d_C, ldc);
+    #else 
+    cublasDgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N, m, n, w, alpha, device_object->d_B, lda, device_object->d_A, ldb, beta, device_object->d_C, ldc);
+    #endif
+    
     cudaEventRecord(*device_object->stop);
+    // destroy cublas
+    cublasDestroy(handle);
 }
 
 void copy_memory_to_host(GraficObject *device_object, bench_t* h_C, int size){
     cudaEventRecord(*device_object->start_memory_copy_host);
     cudaMemcpy(h_C, device_object->d_C, size * sizeof(bench_t), cudaMemcpyDeviceToHost);
     cudaEventRecord(*device_object->stop_memory_copy_host);
-}
+    }
 
 float get_elapsed_time(GraficObject *device_object, bool csv_format, bool csv_format_timestamp, long int current_time){
     cudaEventSynchronize(*device_object->stop_memory_copy_host);
@@ -132,9 +128,9 @@ float get_elapsed_time(GraficObject *device_object, bool csv_format, bool csv_fo
 }
 
 void clean(GraficObject *device_object){
-    cudaError_t err = cudaSuccess;
-    err = cudaFree(device_object->d_A);
-    //printf("cleanup; d_A at address: %p: \n",device_object->d_A);
+	cudaError_t err = cudaSuccess;
+	err = cudaFree(device_object->d_A);
+
     if (err != cudaSuccess)
     {
         fprintf(stderr, "Failed to free device vector A (error code %s)!\n", cudaGetErrorString(err));

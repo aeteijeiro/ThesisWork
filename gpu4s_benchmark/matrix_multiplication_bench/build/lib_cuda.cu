@@ -6,6 +6,8 @@
  * Computes the vector addition of A and B into C. The 3 vectors have the same
  * number of elements numElements.
  */
+
+
 __global__ void
 matrix_multiplication_kernel(const bench_t *A,const bench_t *B,  bench_t *C, const int n, const int m, const int w)
 {
@@ -13,7 +15,7 @@ matrix_multiplication_kernel(const bench_t *A,const bench_t *B,  bench_t *C, con
     unsigned int j = blockIdx.y * blockDim.y + threadIdx.y;
     if (i < n && j < w){
         bench_t acumulated = 0;
-        for (unsigned int k_d = 0; k_d < m; ++k_d )
+        for (unsigned int k_d = 0; k_d < m; k_d++ )
         {
             acumulated += A[i*n+k_d] * B[k_d*w +j];
         }
